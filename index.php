@@ -12,7 +12,7 @@
             เปิดโลกจินตนาการ <br> <span class="text-transparent bg-clip-text bg-gradient-to-r from-gold-300 to-yellow-600">ผ่านตัวหนังสือ</span>
         </h1>
         <p class="text-slate-300 text-lg md:text-xl max-w-2xl mb-10 font-light">
-            คัดสรรหนังสือคุณภาพเยี่ยมมาให้คุณเลือกสรร ทั้งนิยาย วรรณกรรม และหนังสือความรู้ พร้อมบริการส่งตรงถึงบ้าน
+            คัดสรรหนังสือคุณภาพดีมาให้คุณเลือกสรร ทั้งนิยาย วรรณกรรม และหนังสือความรู้ พร้อมบริการส่งตรงถึงบ้าน
         </p>
         <div class="flex gap-4">
             <a href="#books-section" class="bg-gold-500 text-slate-900 px-8 py-3 rounded-full font-bold hover:bg-white hover:text-slate-900 transition duration-300 shadow-lg shadow-gold-500/30">
@@ -52,19 +52,25 @@
         ?>
             <div class="group bg-white rounded-xl shadow-sm hover:shadow-2xl transition duration-300 border border-slate-100 overflow-hidden flex flex-col h-full relative">
                 
-                <?php if($book['stock_sale'] > 0 && $book['stock_rent'] > 0): ?>
-                    <div class="absolute top-3 left-3 z-10 bg-slate-900/80 backdrop-blur text-white text-[10px] font-bold px-2 py-1 rounded">
-                        ขาย/เช่า
-                    </div>
-                <?php elseif($book['stock_sale'] > 0): ?>
-                    <div class="absolute top-3 left-3 z-10 bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-1 rounded">
-                        ขายเท่านั้น
-                    </div>
-                <?php else: ?>
-                    <div class="absolute top-3 left-3 z-10 bg-blue-600/90 text-white text-[10px] font-bold px-2 py-1 rounded">
-                        เช่าเท่านั้น
-                    </div>
-                <?php endif; ?>
+                <div class="absolute top-2 right-2 z-10 flex flex-col items-end gap-1">
+                    <?php if($book['stock_rent'] > 0): ?>
+                        <span class="bg-blue-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
+                            เช่า: <?php echo $book['stock_rent']; ?>
+                        </span>
+                    <?php endif; ?>
+                    
+                    <?php if($book['stock_sale'] > 0): ?>
+                        <span class="bg-emerald-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
+                            ขาย: <?php echo $book['stock_sale']; ?>
+                        </span>
+                    <?php endif; ?>
+
+                    <?php if($book['stock_rent'] <= 0 && $book['stock_sale'] <= 0): ?>
+                        <span class="bg-red-500/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
+                            สินค้าหมด
+                        </span>
+                    <?php endif; ?>
+                </div>
 
                 <div class="relative aspect-[2/3] overflow-hidden bg-slate-100">
                     <?php if ($book['cover_image']): ?>

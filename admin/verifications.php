@@ -49,11 +49,14 @@ if (isset($_GET['action']) && isset($_GET['uid'])) {
     exit;
 }
 
+// ✅ แก้ไข SQL: เพิ่มเงื่อนไข AND v.id = (...) เพื่อดึงเฉพาะรายการ "ล่าสุด" ของแต่ละคน
 $sql = "SELECT v.*, m.fullname, m.email, m.phone 
         FROM verifications v 
         JOIN members m ON v.user_id = m.id 
         WHERE m.verification_status = 'pending' 
+        AND v.id = (SELECT MAX(id) FROM verifications WHERE user_id = m.id)
         ORDER BY v.submitted_at ASC";
+
 $items = $pdo->query($sql)->fetchAll();
 ?>
 

@@ -77,8 +77,23 @@ $p30 = $book['rent_price_30'] > 0 ? $book['rent_price_30'] : $base_rent * 4;
                 </div>
 
                 <div class="md:col-span-7 p-8 md:p-12 flex flex-col">
-                    <h1 class="text-4xl font-serif font-bold text-slate-900 mb-2 leading-tight"><?php echo htmlspecialchars($book['title']); ?></h1>
-                    <p class="text-lg text-slate-500 mb-8 font-light italic">โดย <a href="#" class="text-gold-600 hover:underline"><?php echo htmlspecialchars($book['author']); ?></a></p>
+                    <h1 class="text-2xl md:text-3xl font-serif font-bold text-slate-900 mb-4 leading-snug break-words tracking-tight">
+                        <?php 
+                        $title_html = htmlspecialchars($book['title']);
+                        // เช็คว่ามีวงเล็บหรือไม่ ถ้ามีให้ตัดบรรทัดและลดขนาดตัวอักษร
+                        if (strpos($title_html, '(') !== false) {
+                            $title_html = str_replace('(', '<br><span class="text-lg md:text-xl text-slate-500 font-medium font-sans">(' , $title_html);
+                            $title_html = str_replace(')', ')</span>', $title_html);
+                        }
+                        echo $title_html; 
+                        ?>
+                    </h1>
+                    
+                    <p class="text-lg text-slate-500 mb-8 font-light italic">โดย 
+                        <a href="search.php?q=<?php echo urlencode($book['author']); ?>" class="text-gold-600 hover:underline font-medium">
+                            <?php echo htmlspecialchars($book['author']); ?>
+                        </a>
+                    </p>
 
                     <div class="flex bg-slate-100 p-1.5 rounded-xl mb-8 self-start shadow-inner">
                         <button onclick="switchMode('rent')" id="tab-rent" class="px-8 py-2.5 rounded-lg text-sm font-bold transition shadow-md bg-white text-slate-900 ring-1 ring-black/5">

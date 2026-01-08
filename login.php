@@ -2,10 +2,22 @@
 session_start();
 require_once 'config/db.php'; 
 
+// --- ส่วนเรียกใช้ PHPMailer ---
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
+// ตรวจสอบว่ามีไฟล์ PHPMailer หรือยัง
+if (file_exists('PHPMailer/src/Exception.php')) {
+    require 'PHPMailer/src/Exception.php';
+    require 'PHPMailer/src/PHPMailer.php';
+    require 'PHPMailer/src/SMTP.php';
+}
+// ----------------------------
+
 $sweetalert_script = "";
 
 // ------------------------------------------------------------------
-// 1. Logic เดิม (PHP)
+// PHP Logic (Login & Signup)
 // ------------------------------------------------------------------
 if (isset($_POST['signup'])) {
     $fullname = trim($_POST['fullname']);
@@ -13,24 +25,105 @@ if (isset($_POST['signup'])) {
     $password = $_POST['password'];
     $role = 'member';
 
-    try {
-        $check = $pdo->prepare("SELECT email FROM members WHERE email = ?");
-        $check->execute([$email]);
+    // 1. ตรวจสอบรูปแบบอีเมล (ป้องกัน Error: Invalid address)
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $sweetalert_script = "<script>
+            Swal.fire({
+                icon: 'warning',
+                title: 'รูปแบบอีเมลไม่ถูกต้อง',
+                text: 'กรุณากรอกอีเมลให้ถูกต้อง (ต้องมี @ และ .com)',
+                confirmButtonText: 'ตกลง'
+            }).then(() => { 
+                document.getElementById('mainContainer').classList.add('right-panel-active');
+            });
+        </script>";
+    } else {
+        try {
+            // 2. เช็คว่าอีเมลซ้ำไหม
+            $check = $pdo->prepare("SELECT email FROM members WHERE email = ?");
+            $check->execute([$email]);
 
-        if ($check->rowCount() > 0) {
-            // อีเมลซ้ำ: ให้พลิกไปหน้า Register ค้างไว้
-            $sweetalert_script = "<script>Swal.fire({icon: 'warning', title: 'อีเมลนี้มีผู้ใช้งานแล้ว', confirmButtonColor: '#d97706'}).then(() => { flipCard(true); });</script>";
-        } else {
-            $passwordHash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("INSERT INTO members (fullname, email, password, role) VALUES (?, ?, ?, ?)");
-            if ($stmt->execute([$fullname, $email, $passwordHash, $role])) {
-                $sweetalert_script = "<script>Swal.fire({icon: 'success', title: 'สมัครสมาชิกสำเร็จ!', text: 'ยินดีต้อนรับสู่ The Library', confirmButtonColor: '#0f172a'}).then(() => { window.location.href = 'login.php'; });</script>";
+            if ($check->rowCount() > 0) {
+                $sweetalert_script = "<script>
+                    Swal.fire({
+                        icon: 'warning', 
+                        title: 'อีเมลนี้มีผู้ใช้งานแล้ว', 
+                        confirmButtonText: 'ตกลง'
+                    }).then(() => { 
+                        document.getElementById('mainContainer').classList.add('right-panel-active');
+                    });
+                </script>";
             } else {
-                $sweetalert_script = "<script>Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้', 'error');</script>";
+                // 3. สุ่มรหัส OTP 6 หลัก
+                $otp = rand(100000, 999999);
+                
+                // 4. บันทึกข้อมูล (is_email_verified = 0)
+                $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+                
+                // ตรวจสอบว่าใน Database มีคอลัมน์ otp_code หรือยัง (ถ้ารัน SQL แล้วจะไม่มีปัญหา)
+                $stmt = $pdo->prepare("INSERT INTO members (fullname, email, password, role, otp_code, is_email_verified) VALUES (?, ?, ?, ?, ?, 0)");
+                
+                if ($stmt->execute([$fullname, $email, $passwordHash, $role, $otp])) {
+                    
+                    // 5. ส่งอีเมล (เฉพาะถ้ามี PHPMailer)
+                    if (class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+                        $mail = new PHPMailer(true);
+                        try {
+                            // ตั้งค่า SMTP (Gmail)
+                            $mail->isSMTP();
+                            $mail->Host       = 'smtp.gmail.com';
+                            $mail->SMTPAuth   = true;
+                            
+                            // ************************************************
+                            // ✅ ตั้งค่าอีเมลและรหัสผ่านของคุณให้แล้วครับ
+                            $mail->Username   = 'worachai23249@gmail.com'; 
+                            $mail->Password   = 'ynlytcikzrdvljth';      
+                            // ************************************************
+                            
+                            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                            $mail->Port       = 587;
+                            $mail->CharSet    = 'UTF-8';
+
+                            // ผู้ส่งและผู้รับ
+                            $mail->setFrom('worachai23249@gmail.com', 'The Library System');
+                            $mail->addAddress($email, $fullname);
+
+                            // เนื้อหา
+                            $mail->isHTML(true);
+                            $mail->Subject = 'รหัสยืนยันการสมัครสมาชิก (OTP)';
+                            $mail->Body    = "
+                                <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+                                    <h2 style='color: #0f172a;'>ยินดีต้อนรับสู่ The Library</h2>
+                                    <p>ขอบคุณที่สมัครสมาชิก รหัสยืนยันตัวตน (OTP) ของคุณคือ:</p>
+                                    <h1 style='color: #d97706; letter-spacing: 5px; background: #fef3c7; display: inline-block; padding: 10px 20px; border-radius: 5px;'>{$otp}</h1>
+                                    <p>กรุณานำรหัสนี้ไปกรอกในหน้าเว็บไซต์เพื่อยืนยันบัญชี</p>
+                                    <hr>
+                                    <small style='color: #888;'>หากคุณไม่ได้ทำรายการนี้ โปรดเพิกเฉยต่ออีเมลฉบับนี้</small>
+                                </div>
+                            ";
+
+                            $mail->send();
+
+                            // ส่งสำเร็จ -> ไปหน้ายืนยัน OTP
+                            $_SESSION['pending_email'] = $email;
+                            header("Location: verify_otp.php");
+                            exit;
+
+                        } catch (Exception $e) {
+                            // ถ้าส่งไม่ผ่าน แต่บันทึก DB แล้ว ให้แจ้งเตือน
+                            $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'ส่งอีเมลไม่สำเร็จ', text: 'ระบบบันทึกข้อมูลแล้ว แต่ส่งอีเมลไม่ได้: " . $mail->ErrorInfo . "'});</script>";
+                        }
+                    } else {
+                        $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'ไม่พบ PHPMailer', text: 'กรุณาติดตั้งโฟลเดอร์ PHPMailer'});</script>";
+                    }
+
+                } else {
+                    $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'เกิดข้อผิดพลาด', text: 'ไม่สามารถบันทึกข้อมูลได้'});</script>";
+                }
             }
+        } catch (PDOException $e) {
+            $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'System Error', text: '" . $e->getMessage() . "'});</script>";
         }
-    } catch (PDOException $e) {
-        $sweetalert_script = "<script>Swal.fire('System Error', '" . $e->getMessage() . "', 'error');</script>";
     }
 }
 
@@ -44,19 +137,53 @@ if (isset($_POST['signin'])) {
         $user = $stmt->fetch();
 
         if ($user && password_verify($password, $user['password'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['user_name'] = $user['fullname'];
-            $_SESSION['role'] = $user['role'];
-            $_SESSION['fullname'] = $user['fullname'];
-            $_SESSION['profile_image'] = $user['profile_image'];
+            
+            // ============================================================
+            // ✅ BYPASS: อีเมลเหล่านี้จะเข้าสู่ระบบได้เลยโดยไม่ต้องยืนยัน OTP
+            // ============================================================
+            $bypass_emails = [
+                'admin@library.com',
+                '',
+                '' // <-- อีเมลของคุณ เข้าได้ทันที!
+            ]; 
 
-            $redirect_url = ($user['role'] == 'admin') ? 'admin/index.php' : 'index.php';
-            $sweetalert_script = "<script>const Toast = Swal.mixin({toast: true, position: 'top-end', showConfirmButton: false, timer: 1500, timerProgressBar: true}); Toast.fire({icon: 'success', title: 'เข้าสู่ระบบสำเร็จ'}).then(() => { window.location.href = '$redirect_url'; });</script>";
+            // เช็คว่ายืนยันอีเมลหรือยัง (ยกเว้นคนที่มีชื่อใน $bypass_emails)
+            if ($user['is_email_verified'] == 0 && !in_array($email, $bypass_emails)) {
+                 $_SESSION['pending_email'] = $email;
+                 $sweetalert_script = "<script>
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'ยังไม่ได้ยืนยันอีเมล',
+                        text: 'ระบบจะพาไปหน้ากรอกรหัส OTP',
+                        confirmButtonText: 'ไปหน้ากรอกรหัส',
+                        confirmButtonColor: '#d97706'
+                    }).then(() => {
+                        window.location.href = 'verify_otp.php';
+                    });
+                </script>";
+            } else {
+                // ล็อกอินผ่านฉลุย
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_name'] = $user['fullname'];
+                $_SESSION['role'] = $user['role'];
+                $_SESSION['fullname'] = $user['fullname'];
+                $_SESSION['profile_image'] = $user['profile_image'];
+
+                $redirect_url = ($user['role'] == 'admin') ? 'admin/index.php' : 'index.php';
+                
+                $sweetalert_script = "<script>
+                    const Toast = Swal.mixin({
+                        toast: true, position: 'top-end', showConfirmButton: false, timer: 1500, timerProgressBar: true
+                    }); 
+                    Toast.fire({ icon: 'success', title: 'เข้าสู่ระบบสำเร็จ' }).then(() => { window.location.href = '$redirect_url'; });
+                </script>";
+            }
+
         } else {
-            $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง', confirmButtonColor: '#d97706'});</script>";
+            $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'});</script>";
         }
     } catch (PDOException $e) {
-        $sweetalert_script = "<script>Swal.fire('Error', '" . $e->getMessage() . "', 'error');</script>";
+        $sweetalert_script = "<script>Swal.fire({icon: 'error', title: 'Error', text: '" . $e->getMessage() . "'});</script>";
     }
 }
 ?>
@@ -91,17 +218,46 @@ if (isset($_POST['signin'])) {
     <style>
         body { font-family: 'Kanit', sans-serif; }
         
-        /* --- 3D Flip Classes --- */
-        .perspective-1000 { perspective: 1000px; }
-        .transform-style-3d { transform-style: preserve-3d; }
-        .backface-hidden { 
-            -webkit-backface-visibility: hidden; 
-            backface-visibility: hidden; 
+        /* --- SLIDING ANIMATION STYLES --- */
+        .container-box { position: relative; overflow: hidden; border-radius: 1.5rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+        .form-container { position: absolute; top: 0; height: 100%; transition: all 0.6s ease-in-out; }
+
+        /* Login Form (Default Left) */
+        .sign-in-container { left: 0; width: 50%; z-index: 2; }
+
+        /* Register Form (Default Left, Hidden) */
+        .sign-up-container { left: 0; width: 50%; opacity: 0; z-index: 1; }
+
+        /* Animation States when Active */
+        .container-box.right-panel-active .sign-in-container { transform: translateX(100%); }
+        .container-box.right-panel-active .sign-up-container { transform: translateX(100%); opacity: 1; z-index: 5; animation: show 0.6s; }
+
+        @keyframes show {
+            0%, 49.99% { opacity: 0; z-index: 1; }
+            50%, 100% { opacity: 1; z-index: 5; }
         }
-        .rotate-y-180 { transform: rotateY(180deg); }
+
+        /* Overlay (The Moving Part) */
+        .overlay-container { position: absolute; top: 0; left: 50%; width: 50%; height: 100%; overflow: hidden; transition: transform 0.6s ease-in-out; z-index: 100; }
+        .container-box.right-panel-active .overlay-container { transform: translateX(-100%); }
+
+        .overlay { background: #0f172a; background: linear-gradient(to right, #1e293b, #0f172a); background-repeat: no-repeat; background-size: cover; background-position: 0 0; color: #FFFFFF; position: relative; left: -100%; height: 100%; width: 200%; transform: translateX(0); transition: transform 0.6s ease-in-out; }
+        .container-box.right-panel-active .overlay { transform: translateX(50%); }
+
+        .overlay-panel { position: absolute; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 0 40px; text-align: center; top: 0; height: 100%; width: 50%; transform: translateX(0); transition: transform 0.6s ease-in-out; }
+        .overlay-left { transform: translateX(-20%); }
+        .container-box.right-panel-active .overlay-left { transform: translateX(0); }
+        .overlay-right { right: 0; transform: translateX(0); }
+        .container-box.right-panel-active .overlay-right { transform: translateX(20%); }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .form-container { width: 100%; position: relative; }
+            .sign-in-container, .sign-up-container { width: 100%; height: auto; opacity: 1; z-index: 1; transform: none !important; }
+            .overlay-container { display: none; }
+        }
         
         .input-group:focus-within label { color: #d97706; }
-        .input-group:focus-within svg { color: #d97706; }
         .input-group:focus-within input { border-color: #f59e0b; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.1); }
     </style>
 </head>
@@ -109,98 +265,108 @@ if (isset($_POST['signin'])) {
     
     <div class="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"></div>
 
-    <div class="perspective-1000 w-full max-w-4xl h-[650px] relative z-10">
+    <div class="container-box w-full max-w-4xl min-h-[600px] bg-white relative z-10" id="mainContainer">
         
-        <div id="flip-card-inner" class="relative w-full h-full transition-transform duration-700 transform-style-3d shadow-2xl rounded-3xl">
-            
-            <div id="front-face" class="absolute w-full h-full backface-hidden bg-white rounded-3xl flex overflow-hidden border border-white/10 z-20">
-                <div class="hidden md:flex w-5/12 bg-slate-900 text-white flex-col justify-center items-center p-8 relative">
-                    <div class="relative z-10 text-center">
-                        <div class="w-20 h-20 bg-gradient-to-br from-gold-400 to-gold-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_20px_rgba(245,158,11,0.4)]">
-                            <svg class="w-10 h-10 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                        </div>
-                        <h2 class="text-3xl font-serif font-bold mb-3">Welcome Back</h2>
-                        <p class="text-slate-400 mb-8 text-sm font-light px-4">เข้าสู่ระบบเพื่อจัดการคลังหนังสือของคุณ</p>
-                        <button type="button" onclick="flipCard(true)" class="border border-gold-500 text-gold-500 px-8 py-2.5 rounded-full hover:bg-gold-500 hover:text-slate-900 transition font-bold tracking-wide cursor-pointer z-50">
-                            สมัครสมาชิกใหม่ ➜
-                        </button>
-                    </div>
-                    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                </div>
-
-                <div class="w-full md:w-7/12 p-8 md:p-12 bg-white flex flex-col justify-center relative">
-                    <div class="text-center mb-8">
-                        <h2 class="text-3xl font-serif font-bold text-slate-800 mb-2">Sign In</h2>
-                        <div class="h-1 w-16 bg-gold-500 mx-auto rounded-full"></div>
-                    </div>
-                    <form action="" method="post" class="space-y-5 relative z-10">
-                        <div class="input-group group">
-                            <label class="block text-xs font-bold text-slate-400 uppercase mb-1 transition-colors">Email</label>
-                            <input type="email" name="email" required class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm transition-all outline-none" placeholder="example@email.com">
-                        </div>
-                        <div class="input-group group">
-                            <label class="block text-xs font-bold text-slate-400 uppercase mb-1 transition-colors">Password</label>
-                            <input type="password" name="password" required class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm transition-all outline-none" placeholder="••••••••">
-                        </div>
-                        <button type="submit" name="signin" class="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl hover:bg-slate-800 transition shadow-lg mt-2 transform active:scale-95">
-                            เข้าสู่ระบบ
-                        </button>
-                    </form>
-                    
-                    <div class="mt-8 text-center md:hidden border-t border-slate-100 pt-6 relative z-10">
-                        <p class="text-sm text-slate-500">ยังไม่มีบัญชี?</p>
-                        <button type="button" onclick="flipCard(true)" class="text-gold-600 font-bold hover:underline mt-1 cursor-pointer">สมัครสมาชิก</button>
-                    </div>
-                </div>
-            </div>
-
-            <div id="back-face" class="absolute w-full h-full backface-hidden bg-white rounded-3xl flex overflow-hidden border border-white/10 rotate-y-180 z-10">
+        <div class="form-container sign-up-container bg-white" id="mobileSignUp">
+            <div class="h-full flex flex-col justify-center items-center px-8 md:px-12 py-8 text-center">
+                <h2 class="text-3xl font-serif font-bold text-slate-800 mb-2">สร้างบัญชีใหม่</h2>
+                <div class="h-1 w-16 bg-gold-500 rounded-full mb-6 mx-auto"></div>
                 
-                <div class="w-full md:w-7/12 p-8 md:p-12 bg-white flex flex-col justify-center relative">
-                    <div class="text-center mb-6">
-                        <h2 class="text-3xl font-serif font-bold text-slate-800 mb-2">Create Account</h2>
-                        <div class="h-1 w-16 bg-gold-500 mx-auto rounded-full"></div>
+                <form action="" method="post" class="w-full space-y-4 text-left">
+                    <div class="input-group group">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">ชื่อ-นามสกุล</label>
+                        <input type="text" name="fullname" required 
+                               oninvalid="this.setCustomValidity('กรุณากรอกชื่อ-นามสกุล')" 
+                               oninput="this.setCustomValidity('')"
+                               class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none transition" placeholder="สมชาย ใจดี">
                     </div>
-                    <form action="" method="post" class="space-y-4 relative z-10">
-                        <div class="input-group group">
-                            <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Full Name</label>
-                            <input type="text" name="fullname" required class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none" placeholder="Somchai Jaidee">
-                        </div>
-                        <div class="input-group group">
-                            <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Email</label>
-                            <input type="email" name="email" required class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none" placeholder="example@email.com">
-                        </div>
-                        <div class="input-group group">
-                            <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Password</label>
-                            <input type="password" name="password" required class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none" placeholder="••••••••">
-                        </div>
-                        <button type="submit" name="signup" class="w-full bg-gold-500 text-slate-900 font-bold py-3.5 rounded-xl hover:bg-gold-400 transition shadow-lg mt-2 transform active:scale-95">
-                            สมัครสมาชิก
-                        </button>
-                    </form>
+                    <div class="input-group group">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">อีเมล</label>
+                        <input type="email" name="email" required 
+                               oninvalid="this.setCustomValidity('กรุณากรอกอีเมลที่ถูกต้อง')" 
+                               oninput="this.setCustomValidity('')"
+                               class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none transition" placeholder="example@email.com">
+                    </div>
+                    <div class="input-group group">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">รหัสผ่าน</label>
+                        <input type="password" name="password" required 
+                               oninvalid="this.setCustomValidity('กรุณากำหนดรหัสผ่าน')" 
+                               oninput="this.setCustomValidity('')"
+                               class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none transition" placeholder="••••••••">
+                    </div>
+                    <button type="submit" name="signup" class="w-full bg-gold-500 text-slate-900 font-bold py-3.5 rounded-xl hover:bg-gold-400 transition shadow-lg mt-2 transform active:scale-95">
+                        สมัครสมาชิก
+                    </button>
+                </form>
 
-                    <div class="mt-6 text-center md:hidden border-t border-slate-100 pt-6 relative z-10">
-                        <p class="text-sm text-slate-500">มีบัญชีแล้ว?</p>
-                        <button type="button" onclick="flipCard(false)" class="text-slate-900 font-bold hover:underline mt-1 cursor-pointer">เข้าสู่ระบบ</button>
-                    </div>
+                <div class="mt-6 md:hidden">
+                    <p class="text-sm text-slate-500">มีบัญชีแล้ว?</p>
+                    <button type="button" onclick="toggleMobileView('signin')" class="text-navy-900 font-bold hover:underline">เข้าสู่ระบบ</button>
                 </div>
-
-                <div class="hidden md:flex w-5/12 bg-slate-900 text-white flex-col justify-center items-center p-8 relative">
-                    <div class="relative z-10 text-center">
-                        <div class="w-20 h-20 bg-white/10 backdrop-blur rounded-full flex items-center justify-center mx-auto mb-6 border border-white/20">
-                            <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
-                        </div>
-                        <h2 class="text-3xl font-serif font-bold mb-3">Join The Library</h2>
-                        <p class="text-slate-400 mb-8 text-sm font-light px-4">เริ่มต้นการเดินทางสู่โลกแห่งความรู้ สมัครสมาชิกกับเราวันนี้</p>
-                        <button type="button" onclick="flipCard(false)" class="border border-white text-white px-8 py-2.5 rounded-full hover:bg-white hover:text-slate-900 transition font-bold tracking-wide cursor-pointer z-50">
-                            ➜ ฉันมีบัญชีแล้ว
-                        </button>
-                    </div>
-                    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                </div>
-
             </div>
+        </div>
 
+        <div class="form-container sign-in-container bg-white" id="mobileSignIn">
+            <div class="h-full flex flex-col justify-center items-center px-8 md:px-12 py-8 text-center">
+                <h2 class="text-3xl font-serif font-bold text-slate-800 mb-2">เข้าสู่ระบบ</h2>
+                <div class="h-1 w-16 bg-gold-500 rounded-full mb-8 mx-auto"></div>
+                
+                <form action="" method="post" class="w-full space-y-5 text-left">
+                    <div class="input-group group">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1 transition-colors">อีเมล</label>
+                        <input type="email" name="email" required 
+                               oninvalid="this.setCustomValidity('กรุณากรอกอีเมล')" 
+                               oninput="this.setCustomValidity('')"
+                               class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm transition-all outline-none" placeholder="example@email.com">
+                    </div>
+                    <div class="input-group group">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1 transition-colors">รหัสผ่าน</label>
+                        <input type="password" name="password" required 
+                               oninvalid="this.setCustomValidity('กรุณากรอกรหัสผ่าน')" 
+                               oninput="this.setCustomValidity('')"
+                               class="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm transition-all outline-none" placeholder="••••••••">
+                    </div>
+                    <button type="submit" name="signin" class="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl hover:bg-slate-800 transition shadow-lg mt-2 transform active:scale-95">
+                        เข้าสู่ระบบ
+                    </button>
+                </form>
+
+                <div class="mt-8 md:hidden border-t border-slate-100 pt-6 w-full">
+                    <p class="text-sm text-slate-500">ยังไม่มีบัญชี?</p>
+                    <button type="button" onclick="toggleMobileView('signup')" class="text-gold-600 font-bold hover:underline mt-1">สมัครสมาชิก</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="overlay-container">
+            <div class="overlay">
+                <div class="overlay-panel overlay-left">
+                    <div class="w-20 h-20 bg-white/10 backdrop-blur rounded-full flex items-center justify-center mb-6 border border-white/20">
+                        <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+                    </div>
+                    <h2 class="text-3xl font-serif font-bold mb-4">ยินดีต้อนรับกลับมา!</h2>
+                    <p class="text-slate-300 mb-8 font-light leading-relaxed">
+                        ถ้าคุณมีบัญชีผู้ใช้งานอยู่แล้ว <br>สามารถเข้าสู่ระบบเพื่อจัดการหนังสือได้ทันที
+                    </p>
+                    <button class="border border-white bg-transparent text-white px-8 py-2.5 rounded-full font-bold hover:bg-white hover:text-navy-900 transition tracking-wide transform active:scale-95" id="signInBtn">
+                        เข้าสู่ระบบ
+                    </button>
+                </div>
+
+                <div class="overlay-panel overlay-right">
+                    <div class="w-20 h-20 bg-gradient-to-br from-gold-400 to-gold-600 rounded-full flex items-center justify-center mb-6 shadow-[0_0_20px_rgba(245,158,11,0.4)]">
+                        <svg class="w-10 h-10 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                    </div>
+                    <h2 class="text-3xl font-serif font-bold mb-4">เข้าร่วมกับเรา</h2>
+                    <p class="text-slate-300 mb-8 font-light leading-relaxed">
+                        เริ่มต้นการเดินทางสู่โลกแห่งความรู้ <br>และคลังหนังสือพรีเมียม สมัครสมาชิกเลย
+                    </p>
+                    <button class="border border-gold-500 bg-transparent text-gold-500 px-8 py-2.5 rounded-full font-bold hover:bg-gold-500 hover:text-navy-900 transition tracking-wide transform active:scale-95" id="signUpBtn">
+                        สมัครสมาชิกใหม่
+                    </button>
+                </div>
+            </div>
+            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10 pointer-events-none"></div>
         </div>
     </div>
     
@@ -209,38 +375,30 @@ if (isset($_POST['signin'])) {
     </div>
 
     <script>
-        // ฟังก์ชันสั่งพลิกการ์ด (Flip Control) + จัดการ Z-Index
-        function flipCard(isRegister) {
-            const cardInner = document.getElementById('flip-card-inner');
-            const frontFace = document.getElementById('front-face');
-            const backFace = document.getElementById('back-face');
+        // Desktop Sliding Logic
+        const signUpBtn = document.getElementById('signUpBtn');
+        const signInBtn = document.getElementById('signInBtn');
+        const container = document.getElementById('mainContainer');
 
-            if (isRegister) {
-                // หมุนไปหน้า Register
-                cardInner.classList.add('rotate-y-180');
-                
-                // สลับ Z-Index เพื่อให้หน้า Register (Back) กดได้
-                // รอให้หมุนไปครึ่งทาง (300ms) แล้วค่อยสลับ จะเนียนที่สุด
-                setTimeout(() => {
-                    frontFace.classList.remove('z-20');
-                    frontFace.classList.add('z-10');
-                    
-                    backFace.classList.remove('z-10');
-                    backFace.classList.add('z-20');
-                }, 150);
-                
+        signUpBtn.addEventListener('click', () => {
+            container.classList.add("right-panel-active");
+        });
+
+        signInBtn.addEventListener('click', () => {
+            container.classList.remove("right-panel-active");
+        });
+
+        // Mobile Switch Logic (Hidden/Block)
+        function toggleMobileView(view) {
+            const signInForm = document.getElementById('mobileSignIn');
+            const signUpForm = document.getElementById('mobileSignUp');
+            
+            if (view === 'signup') {
+                signInForm.classList.add('hidden');
+                signUpForm.classList.remove('hidden');
             } else {
-                // หมุนกลับมาหน้า Login
-                cardInner.classList.remove('rotate-y-180');
-                
-                // สลับ Z-Index กลับมา
-                setTimeout(() => {
-                    backFace.classList.remove('z-20');
-                    backFace.classList.add('z-10');
-                    
-                    frontFace.classList.remove('z-10');
-                    frontFace.classList.add('z-20');
-                }, 150);
+                signUpForm.classList.add('hidden');
+                signInForm.classList.remove('hidden');
             }
         }
     </script>

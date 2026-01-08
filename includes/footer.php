@@ -88,8 +88,10 @@ function footerTextClass($pageName, $current_page) {
                 </div>
             </div>
         </div>
-        
         </div>
+        <?php if(isset($_SESSION['user_id']) && $_SESSION['role'] == 'member'): ?>
+    <?php require_once 'chat_widget.php'; ?>
+<?php endif; ?>
 </footer>
 </body>
 </html>

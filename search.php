@@ -73,11 +73,23 @@ function renderBooksContent($books, $title) {
                             <div class="w-full h-full flex items-center justify-center bg-slate-200 text-slate-400 text-xs">No Cover</div>
                         <?php endif; ?>
                         
-                        <div class="absolute top-3 right-3">
-                            <?php if ($item['status'] == 'available'): ?>
-                                <span class="bg-emerald-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg tracking-wider">AVAILABLE</span>
-                            <?php else: ?>
-                                <span class="bg-red-500/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg tracking-wider">RENTED</span>
+                        <div class="absolute top-2 right-2 flex flex-col items-end gap-1">
+                            <?php if($item['stock_rent'] > 0): ?>
+                                <span class="bg-blue-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg tracking-wider">
+                                    เช่า: <?php echo $item['stock_rent']; ?>
+                                </span>
+                            <?php endif; ?>
+                            
+                            <?php if($item['stock_sale'] > 0): ?>
+                                <span class="bg-emerald-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg tracking-wider">
+                                    ขาย: <?php echo $item['stock_sale']; ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <?php if($item['stock_rent'] <= 0 && $item['stock_sale'] <= 0): ?>
+                                <span class="bg-red-500/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg tracking-wider">
+                                    สินค้าหมด
+                                </span>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -94,13 +106,21 @@ function renderBooksContent($books, $title) {
                         
                         <div class="mt-auto pt-4 border-t border-slate-50 flex justify-between items-center">
                             <div class="flex flex-col">
-                                <span class="text-[10px] text-slate-400 uppercase tracking-wide">ราคาเช่าเริ่มต้น</span>
-                                <span class="text-slate-800 font-bold text-lg">
-                                    <?php 
-                                        $startPrice = ($item['rent_price_7'] > 0) ? $item['rent_price_7'] : $item['rent_price'];
-                                        echo number_format($startPrice); 
-                                    ?> <span class="text-xs font-normal text-slate-500">บาท</span>
-                                </span>
+                                <?php if($item['stock_rent'] > 0): ?>
+                                    <span class="text-[10px] text-slate-400 uppercase tracking-wide">ราคาเช่าเริ่มต้น</span>
+                                    <span class="text-slate-800 font-bold text-lg">
+                                        <?php 
+                                            $startPrice = ($item['rent_price_7'] > 0) ? $item['rent_price_7'] : $item['rent_price'];
+                                            echo number_format($startPrice); 
+                                        ?> <span class="text-xs font-normal text-slate-500">บาท</span>
+                                    </span>
+                                <?php endif; ?>
+                            </div>
+                            <div class="text-right">
+                                <?php if($item['stock_sale'] > 0): ?>
+                                    <span class="text-[10px] text-slate-400 uppercase tracking-wide">ราคาขาย</span>
+                                    <div class="text-gold-600 font-bold text-lg"><?php echo number_format($item['sell_price']); ?> ฿</div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>

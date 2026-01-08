@@ -2,187 +2,308 @@
 session_start();
 require_once 'config/db.php';
 
-if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
+// เช็คการล็อกอิน
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit;
+}
 
 $user_id = $_SESSION['user_id'];
-$success_msg = "";
-$error_msg = "";
+$msg_script = "";
 
+// --- 1. ส่วนบันทึกข้อมูล (PHP Logic) ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $fullname = $_POST['fullname'];
-    $phone = $_POST['phone'];
+    $fullname = trim($_POST['fullname']);
+    $phone = trim($_POST['phone']);
     
-    $sql = "UPDATE members SET fullname = ?, phone = ? WHERE id = ?";
-    $stmt = $pdo->prepare($sql);
-    
-    if ($stmt->execute([$fullname, $phone, $user_id])) {
-        $_SESSION['fullname'] = $fullname;
-        $success_msg = "บันทึกข้อมูลเรียบร้อยแล้ว";
-    } else {
-        $error_msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูล";
-    }
+    try {
+        // 1.1 อัปเดตข้อมูลทั่วไป
+        $sql = "UPDATE members SET fullname = ?, phone = ? WHERE id = ?";
+        $params = [$fullname, $phone, $user_id];
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
 
-    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-        $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-        $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
-        
-        if (in_array($ext, $allowed)) {
-            $new_filename = "profile_" . $user_id . "_" . time() . "." . $ext;
-            $upload_path = "uploads/profiles/" . $new_filename;
-
-            if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $upload_path)) {
-                $sql_img = "UPDATE members SET profile_image = ? WHERE id = ?";
-                $pdo->prepare($sql_img)->execute([$new_filename, $user_id]);
-                $_SESSION['profile_image'] = $new_filename;
-                $success_msg = "อัปเดตข้อมูลและรูปโปรไฟล์เรียบร้อยแล้ว";
-            } else {
-                $error_msg = "เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ";
+        // 1.2 จัดการรูปโปรไฟล์ (ถ้ามีการ Crop มา)
+        if (!empty($_POST['cropped_image_data'])) {
+            $data = $_POST['cropped_image_data'];
+            
+            // แปลง Base64 กลับเป็นไฟล์รูปภาพ
+            list($type, $data) = explode(';', $data);
+            list(, $data)      = explode(',', $data);
+            $data = base64_decode($data);
+            
+            // ตั้งชื่อไฟล์ใหม่
+            $new_filename = 'profile_' . $user_id . '_' . time() . '.png';
+            $path = 'uploads/profiles/' . $new_filename;
+            
+            // สร้างโฟลเดอร์ถ้ายังไม่มี
+            if (!file_exists('uploads/profiles')) {
+                mkdir('uploads/profiles', 0777, true);
             }
-        } else {
-            $error_msg = "รองรับเฉพาะไฟล์รูปภาพ (JPG, PNG, GIF)";
+
+            // บันทึกไฟล์ลง Server
+            file_put_contents($path, $data);
+
+            // อัปเดตชื่อไฟล์ลงฐานข้อมูล
+            $stmt_img = $pdo->prepare("UPDATE members SET profile_image = ? WHERE id = ?");
+            $stmt_img->execute([$new_filename, $user_id]);
+            
+            // อัปเดต Session รูปภาพด้วย (เพื่อให้ Header เปลี่ยนทันที)
+            $_SESSION['profile_image'] = $new_filename;
         }
+
+        // อัปเดต Session ชื่อ
+        $_SESSION['fullname'] = $fullname;
+
+        $msg_script = "<script>
+            Swal.fire({
+                icon: 'success',
+                title: 'บันทึกสำเร็จ',
+                text: 'อัปเดตข้อมูลและรูปโปรไฟล์เรียบร้อยแล้ว',
+                confirmButtonColor: '#0f172a',
+                timer: 2000
+            });
+        </script>";
+
+    } catch (PDOException $e) {
+        $msg_script = "<script>Swal.fire({icon: 'error', title: 'เกิดข้อผิดพลาด', text: '".$e->getMessage()."'});</script>";
     }
 }
 
+// --- 2. ดึงข้อมูลล่าสุดมาแสดง ---
 $stmt = $pdo->prepare("SELECT * FROM members WHERE id = ?");
 $stmt->execute([$user_id]);
 $user = $stmt->fetch();
-
-require_once 'includes/header.php'; 
 ?>
 
-<div class="bg-slate-50 min-h-screen py-10 font-sans">
-    <div class="container mx-auto px-4 max-w-5xl">
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แก้ไขข้อมูลส่วนตัว - The Library</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        gold: { 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706' },
+                        navy: { 800: '#1e293b', 900: '#0f172a' }
+                    },
+                    fontFamily: {
+                        serif: ['"Playfair Display"', 'serif'],
+                        sans: ['"Kanit"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; background-color: #f8fafc; }
+        .cropper-container { max-height: 500px; }
+    </style>
+</head>
+<body>
+
+    <?php 
+    if (file_exists('header.php')) {
+        require_once 'header.php';
+    } elseif (file_exists('includes/header.php')) {
+        require_once 'includes/header.php';
+    } else {
+        // กรณีหาไฟล์ไม่เจอ จะได้ไม่ Error จอขาว แต่จะไม่มีเมนู
+        echo '<div class="bg-red-100 text-red-700 p-4 text-center">Warning: header.php not found</div>';
+    }
+    ?>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         
-        <div class="flex flex-col md:flex-row gap-8">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
             
-            <aside class="w-full md:w-72 flex-shrink-0">
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sticky top-24">
-                    <div class="text-center mb-6">
-                        <div class="relative w-24 h-24 mx-auto mb-3">
-                            <?php if(!empty($user['profile_image'])): ?>
-                                <img src="uploads/profiles/<?php echo $user['profile_image']; ?>" class="w-full h-full object-cover rounded-full border-4 border-slate-50 shadow-md">
-                            <?php else: ?>
-                                <div class="w-full h-full bg-slate-100 rounded-full flex items-center justify-center text-slate-300 border-4 border-slate-50">
-                                    <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                                </div>
-                            <?php endif; ?>
-                            <div class="absolute bottom-0 right-0 w-6 h-6 bg-green-500 border-2 border-white rounded-full"></div>
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
+                    <div class="w-24 h-24 mx-auto rounded-full p-1 border-2 border-gold-500 mb-4 overflow-hidden relative">
+                         <?php 
+                            $img_src = !empty($user['profile_image']) ? "uploads/profiles/" . $user['profile_image'] : "https://ui-avatars.com/api/?name=".urlencode($user['fullname'])."&background=0f172a&color=fbbf24";
+                         ?>
+                        <img src="<?php echo $img_src; ?>" class="w-full h-full object-cover rounded-full">
+                        <div class="absolute bottom-0 right-0 w-4 h-4 bg-emerald-500 border-2 border-white rounded-full"></div>
+                    </div>
+                    <h3 class="font-bold text-lg text-navy-900"><?php echo htmlspecialchars($user['fullname']); ?></h3>
+                    <p class="text-xs text-slate-500"><?php echo htmlspecialchars($user['email']); ?></p>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <a href="profile.php" class="flex items-center gap-3 px-6 py-4 bg-navy-900 text-white font-medium border-l-4 border-gold-500">
+                        <i class="fa-regular fa-user"></i> ข้อมูลส่วนตัว
+                    </a>
+                    <a href="profile_addresses.php" class="flex items-center gap-3 px-6 py-4 text-slate-600 hover:bg-slate-50 transition border-b border-slate-50">
+                        <i class="fa-solid fa-location-dot"></i> ที่อยู่จัดส่ง
+                    </a>
+                    <a href="change_password.php" class="flex items-center gap-3 px-6 py-4 text-slate-600 hover:bg-slate-50 transition border-b border-slate-50">
+                        <i class="fa-solid fa-lock"></i> เปลี่ยนรหัสผ่าน
+                    </a>
+                    <a href="history.php" class="flex items-center gap-3 px-6 py-4 text-slate-600 hover:bg-slate-50 transition">
+                        <i class="fa-regular fa-bell"></i> การแจ้งเตือน
+                    </a>
+                </div>
+            </div>
+
+            <div class="lg:col-span-3">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
+                    
+                    <div class="flex items-center gap-3 mb-6 pb-6 border-b border-slate-100">
+                        <div class="w-10 h-10 rounded-full bg-gold-100 text-gold-600 flex items-center justify-center">
+                            <i class="fa-solid fa-pen-to-square"></i>
                         </div>
-                        <h3 class="font-serif font-bold text-lg text-slate-800"><?php echo htmlspecialchars($user['fullname']); ?></h3>
-                        <p class="text-xs text-slate-500"><?php echo htmlspecialchars($user['email']); ?></p>
+                        <h2 class="text-2xl font-serif font-bold text-navy-900">แก้ไขข้อมูลส่วนตัว</h2>
                     </div>
 
-                    <nav class="space-y-1">
-                        <a href="profile.php" class="flex items-center gap-3 px-4 py-3 bg-slate-900 text-white rounded-xl shadow-md transition">
-                            <svg class="w-5 h-5 text-gold-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                            <span class="text-sm font-medium">ข้อมูลส่วนตัว</span>
-                        </a>
-                        <a href="profile_addresses.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                            <span class="text-sm font-medium">ที่อยู่จัดส่ง</span>
-                        </a>
-                        <a href="change_password.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                            <span class="text-sm font-medium">เปลี่ยนรหัสผ่าน</span>
-                        </a>
-                        <a href="verify.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span class="text-sm font-medium">ยืนยันตัวตน (KYC)</span>
-                        </a>
-                        <a href="messages.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
-                            <span class="text-sm font-medium">การแจ้งเตือน</span>
-                        </a>
-                    </nav>
-                </div>
-            </aside>
-
-            <main class="flex-grow">
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-                    <h1 class="text-2xl font-serif font-bold text-slate-800 mb-6 pb-4 border-b border-slate-100 flex items-center gap-3">
-                        <span class="bg-gold-100 text-gold-600 p-2 rounded-lg"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></span>
-                        แก้ไขข้อมูลส่วนตัว
-                    </h1>
-
-                    <?php if($success_msg): ?>
-                        <div class="mb-6 p-4 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-xl flex items-center gap-3">
-                            <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-                            <?php echo $success_msg; ?>
-                        </div>
-                    <?php endif; ?>
-                    
-                    <?php if($error_msg): ?>
-                        <div class="mb-6 p-4 bg-red-50 border border-red-100 text-red-700 rounded-xl flex items-center gap-3">
-                            <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-                            <?php echo $error_msg; ?>
-                        </div>
-                    <?php endif; ?>
-
-                    <form method="POST" enctype="multipart/form-data" class="space-y-6">
+                    <form action="" method="post" enctype="multipart/form-data" id="profileForm">
                         
-                        <div class="flex items-start gap-6">
-                            <div class="flex-shrink-0 relative group cursor-pointer">
-                                <div class="w-24 h-24 rounded-2xl overflow-hidden bg-slate-100 border-2 border-dashed border-slate-300 group-hover:border-gold-500 transition">
-                                    <?php if(!empty($user['profile_image'])): ?>
-                                        <img id="preview-img" src="uploads/profiles/<?php echo $user['profile_image']; ?>" class="w-full h-full object-cover">
-                                    <?php else: ?>
-                                        <img id="preview-img" class="w-full h-full object-cover hidden">
-                                        <div id="upload-placeholder" class="w-full h-full flex flex-col items-center justify-center text-slate-400">
-                                            <svg class="w-8 h-8 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                            <span class="text-[10px]">Upload</span>
-                                        </div>
-                                    <?php endif; ?>
+                        <div class="flex flex-col sm:flex-row items-center gap-8 mb-8">
+                            <div class="relative group cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                                <div class="w-32 h-32 rounded-2xl overflow-hidden shadow-md border-4 border-white ring-2 ring-slate-100 relative">
+                                    <img id="mainPreview" src="<?php echo $img_src; ?>" class="w-full h-full object-cover transition duration-300 group-hover:scale-110">
+                                    
+                                    <div class="absolute inset-0 bg-navy-900/50 flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition duration-300">
+                                        <i class="fa-solid fa-camera text-2xl mb-1"></i>
+                                        <span class="text-xs font-light">เปลี่ยนรูป</span>
+                                    </div>
                                 </div>
-                                <input type="file" name="profile_image" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="previewImage(this)">
                             </div>
-                            <div class="pt-2">
-                                <h4 class="font-bold text-slate-700">รูปโปรไฟล์</h4>
-                                <p class="text-xs text-slate-500 mt-1">คลิกที่รูปเพื่ออัปโหลดใหม่ (รองรับ JPG, PNG)</p>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-sm font-bold text-slate-700 mb-2">ชื่อ - นามสกุล</label>
-                                <input type="text" name="fullname" value="<?php echo htmlspecialchars($user['fullname']); ?>" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-gold-500 focus:ring-2 focus:ring-gold-500/20 outline-none transition" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold text-slate-700 mb-2">เบอร์โทรศัพท์</label>
-                                <input type="text" name="phone" value="<?php echo htmlspecialchars($user['phone']); ?>" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-gold-500 focus:ring-2 focus:ring-gold-500/20 outline-none transition" placeholder="08x-xxx-xxxx">
-                            </div>
-                            <div class="md:col-span-2">
-                                <label class="block text-sm font-bold text-slate-700 mb-2">อีเมล (ใช้สำหรับเข้าสู่ระบบ)</label>
-                                <input type="email" value="<?php echo htmlspecialchars($user['email']); ?>" class="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed" disabled>
+                            
+                            <div class="flex-1 text-center sm:text-left">
+                                <h4 class="font-bold text-navy-900 mb-1">รูปโปรไฟล์</h4>
+                                <p class="text-sm text-slate-500 mb-3">คลิกที่รูปเพื่ออัปโหลดใหม่ (รองรับ JPG, PNG)</p>
+                                <button type="button" onclick="document.getElementById('fileInput').click()" class="text-sm bg-slate-100 hover:bg-slate-200 text-navy-900 px-4 py-2 rounded-lg transition font-medium">
+                                    เลือกรูปภาพ...
+                                </button>
+                                <input type="file" id="fileInput" accept="image/*" class="hidden">
+                                <input type="hidden" name="cropped_image_data" id="croppedImageData">
                             </div>
                         </div>
 
-                        <div class="pt-4 border-t border-slate-100 flex justify-end">
-                            <button type="submit" class="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-gold-500 hover:text-slate-900 transition shadow-lg transform active:scale-95">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                            <div>
+                                <label class="block text-sm font-bold text-navy-900 mb-2">ชื่อ - นามสกุล</label>
+                                <input type="text" name="fullname" value="<?php echo htmlspecialchars($user['fullname']); ?>" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gold-400 transition" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-bold text-navy-900 mb-2">เบอร์โทรศัพท์</label>
+                                <input type="text" name="phone" value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gold-400 transition">
+                            </div>
+                        </div>
+
+                        <div class="mb-8">
+                            <label class="block text-sm font-bold text-navy-900 mb-2">อีเมล (ใช้สำหรับเข้าสู่ระบบ)</label>
+                            <input type="email" value="<?php echo htmlspecialchars($user['email']); ?>" class="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed" readonly>
+                        </div>
+
+                        <div class="flex justify-end pt-6 border-t border-slate-100">
+                            <button type="submit" class="bg-navy-900 text-white px-8 py-3.5 rounded-xl font-bold hover:bg-navy-800 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition duration-300">
                                 บันทึกการเปลี่ยนแปลง
                             </button>
                         </div>
+
                     </form>
                 </div>
-            </main>
+            </div>
         </div>
     </div>
-</div>
 
-<script>
-function previewImage(input) {
-    if (input.files && input.files[0]) {
-        var reader = new FileReader();
-        reader.onload = function(e) {
-            document.getElementById('preview-img').src = e.target.result;
-            document.getElementById('preview-img').classList.remove('hidden');
-            if(document.getElementById('upload-placeholder')) {
-                document.getElementById('upload-placeholder').classList.add('hidden');
+    <div id="cropModal" class="fixed inset-0 z-50 hidden bg-navy-900/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-fade-in-up">
+            <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-navy-900 flex items-center gap-2">
+                    <i class="fa-solid fa-crop-simple text-gold-500"></i> จัดระเบียบรูปโปรไฟล์
+                </h3>
+                <button onclick="closeCropModal()" class="text-slate-400 hover:text-red-500 transition"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            
+            <div class="p-6">
+                <div class="h-80 w-full bg-slate-900 rounded-lg overflow-hidden mb-4 relative">
+                    <img id="imageToCrop" src="" class="max-w-full block">
+                </div>
+                <p class="text-xs text-slate-500 text-center mb-4">
+                    <i class="fa-solid fa-hand-pointer"></i> ลากเพื่อเลื่อน | เลื่อนเมาส์เพื่อซูมเข้า-ออก
+                </p>
+                
+                <div class="flex gap-3 justify-end">
+                    <button type="button" onclick="closeCropModal()" class="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition">ยกเลิก</button>
+                    <button type="button" onclick="cropImage()" class="px-6 py-2.5 rounded-xl bg-gold-500 text-white font-bold hover:bg-gold-600 shadow-lg transition">
+                        <i class="fa-solid fa-check mr-1"></i> ยืนยันรูปนี้
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let cropper;
+        const fileInput = document.getElementById('fileInput');
+        const cropModal = document.getElementById('cropModal');
+        const imageToCrop = document.getElementById('imageToCrop');
+        const mainPreview = document.getElementById('mainPreview');
+        const croppedImageData = document.getElementById('croppedImageData');
+
+        // 1. เมื่อเลือกไฟล์
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    imageToCrop.src = event.target.result;
+                    cropModal.classList.remove('hidden');
+                    
+                    if (cropper) { cropper.destroy(); }
+                    
+                    cropper = new Cropper(imageToCrop, {
+                        aspectRatio: 1,
+                        viewMode: 1,
+                        dragMode: 'move',
+                        autoCropArea: 0.8,
+                        background: false,
+                        zoomable: true,
+                        movable: true,
+                    });
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 2. เมื่อกดยืนยัน (Crop)
+        function cropImage() {
+            if (cropper) {
+                const canvas = cropper.getCroppedCanvas({ width: 400, height: 400 });
+                const base64Image = canvas.toDataURL('image/png');
+                mainPreview.src = base64Image;
+                croppedImageData.value = base64Image;
+                closeCropModal();
             }
         }
-        reader.readAsDataURL(input.files[0]);
-    }
-}
-</script>
 
-<?php require_once 'includes/footer.php'; ?>
+        function closeCropModal() {
+            cropModal.classList.add('hidden');
+            fileInput.value = ''; 
+        }
+
+        cropModal.addEventListener('click', function(e) {
+            if (e.target === cropModal) {
+                closeCropModal();
+            }
+        });
+    </script>
+    
+    <?php echo $msg_script; ?>
+</body>
+</html>

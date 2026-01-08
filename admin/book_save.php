@@ -2,111 +2,112 @@
 session_start();
 require_once '../config/db.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' || $_SESSION['role'] !== 'admin') {
-    header("Location: ../index.php"); exit;
+// เช็คว่าเป็น Admin
+if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    header("Location: ../login.php");
+    exit;
 }
 
-$id = $_POST['id'] ?? null;
-$title = $_POST['title'];
-$author = $_POST['author'];
-$isbn = $_POST['isbn'];
-$category_id = $_POST['category_id'];
+// เช็คว่ามีการส่งข้อมูลมาจริง
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $id = $_POST['id'] ?? '';
+    $title = trim($_POST['title']);
+    $author = trim($_POST['author']);
+    $category_id = $_POST['category_id'];
+    $isbn = trim($_POST['isbn']);
+    
+    // ❌ ลบ price ออก เพราะในฐานข้อมูลไม่มีคอลัมน์นี้
+    // $price = $_POST['price'] ?? 0; 
+    
+    $sell_price = $_POST['sell_price']; // ราคาขาย
+    $rent_price = $_POST['rent_price']; // ราคาเช่า
+    $rent_price_7 = $_POST['rent_price_7'] ?? 0;
+    $rent_price_15 = $_POST['rent_price_15'] ?? 0;
+    $rent_price_30 = $_POST['rent_price_30'] ?? 0;
 
-// รับค่าสต็อก
-$stock_rent = $_POST['stock_rent'] ?? 0;
-$stock_sale = $_POST['stock_sale'] ?? 0;
-$status = ($stock_rent > 0) ? 'available' : 'borrowed';
+    $stock_rent = $_POST['stock_rent'];
+    $stock_sale = $_POST['stock_sale'];
+    $description = trim($_POST['description']);
+    $status = 'available';
 
-$description = $_POST['description'] ?? '';
-
-// รับราคา (ทั่วไป) และราคาเช่าตามวัน
-$rent_price = $_POST['rent_price'] ?? 0;
-$sell_price = $_POST['sell_price'] ?? 0;
-
-// 🔥 รับค่าราคาเช่าใหม่ 3 ระดับ
-$rent_price_7  = $_POST['rent_price_7'] ?? 0;
-$rent_price_15 = $_POST['rent_price_15'] ?? 0;
-$rent_price_30 = $_POST['rent_price_30'] ?? 0;
-
-// ฟังก์ชันอัปโหลดไฟล์ (เพิ่มความปลอดภัยด้วย uniqid)
-function uploadFile($fileInputName, $oldFileName = null) {
-    if (isset($_FILES[$fileInputName]) && $_FILES[$fileInputName]['error'] === UPLOAD_ERR_OK) {
-        $fileTmpPath = $_FILES[$fileInputName]['tmp_name'];
-        $fileName = $_FILES[$fileInputName]['name'];
-        $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-        
-        // เช็ค MIME type
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mimeType = $finfo->file($fileTmpPath);
-        $allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-
-        if (in_array($mimeType, $allowedMimeTypes)) {
-            $prefix = ($fileInputName == 'cover_image') ? 'front_' : 'back_';
-            // ใช้ uniqid ลดโอกาสชื่อซ้ำ
-            $newFileName = $prefix . uniqid() . '.' . $fileExtension;
-            $uploadFileDir = '../uploads/covers/';
-            
-            if (!file_exists($uploadFileDir)) {
-                mkdir($uploadFileDir, 0777, true);
-            }
-
-            if(move_uploaded_file($fileTmpPath, $uploadFileDir . $newFileName)) {
-                if ($oldFileName && file_exists($uploadFileDir . $oldFileName)) {
-                    unlink($uploadFileDir . $oldFileName);
-                }
-                return $newFileName;
-            }
-        }
+    // จัดการอัปโหลดรูปภาพ
+    $cover_image = $_POST['old_cover'] ?? '';
+    if (!empty($_FILES['cover_image']['name'])) {
+        $ext = pathinfo($_FILES['cover_image']['name'], PATHINFO_EXTENSION);
+        $new_name = "front_" . uniqid() . "." . $ext;
+        move_uploaded_file($_FILES['cover_image']['tmp_name'], "../uploads/covers/" . $new_name);
+        $cover_image = $new_name;
     }
-    return $oldFileName;
+
+    $back_cover_image = $_POST['old_back_cover'] ?? '';
+    if (!empty($_FILES['back_cover_image']['name'])) {
+        $ext = pathinfo($_FILES['back_cover_image']['name'], PATHINFO_EXTENSION);
+        $new_name = "back_" . uniqid() . "." . $ext;
+        move_uploaded_file($_FILES['back_cover_image']['tmp_name'], "../uploads/covers/" . $new_name);
+        $back_cover_image = $new_name;
+    }
+
+    try {
+        if ($id) {
+            // --- กรณีแก้ไข (Update) ---
+            // ❌ ลบ price=? ออกจาก SQL
+            $sql = "UPDATE books SET 
+                    title=?, author=?, category_id=?, isbn=?, sell_price=?, rent_price=?, 
+                    rent_price_7=?, rent_price_15=?, rent_price_30=?,
+                    stock_rent=?, stock_sale=?, description=?, cover_image=?, back_cover_image=? 
+                    WHERE id=?";
+            $stmt = $pdo->prepare($sql);
+            // ❌ ลบ $price ออกจาก params
+            $params = [$title, $author, $category_id, $isbn, $sell_price, $rent_price, 
+                       $rent_price_7, $rent_price_15, $rent_price_30,
+                       $stock_rent, $stock_sale, $description, $cover_image, $back_cover_image, $id];
+            $action_text = "แก้ไขข้อมูลสำเร็จ";
+        } else {
+            // --- กรณีเพิ่มใหม่ (Insert) ---
+            // ❌ ลบ price ออกจาก SQL
+            $sql = "INSERT INTO books (title, author, category_id, isbn, sell_price, rent_price, rent_price_7, rent_price_15, rent_price_30, stock_rent, stock_sale, description, cover_image, back_cover_image, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $stmt = $pdo->prepare($sql);
+            // ❌ ลบ $price ออกจาก params
+            $params = [$title, $author, $category_id, $isbn, $sell_price, $rent_price, $rent_price_7, $rent_price_15, $rent_price_30, $stock_rent, $stock_sale, $description, $cover_image, $back_cover_image, $status];
+            $action_text = "เพิ่มหนังสือใหม่สำเร็จ";
+        }
+
+        if ($stmt->execute($params)) {
+            echo_sweetalert('success', 'สำเร็จ!', $action_text, 'books.php');
+        } else {
+            echo_sweetalert('error', 'เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้', 'book_form.php');
+        }
+
+    } catch (PDOException $e) {
+        echo_sweetalert('error', 'Database Error', $e->getMessage(), 'book_form.php');
+    }
 }
 
-$cover_image = null;
-$back_cover_image = null;
-if ($id) {
-    $stmt = $pdo->prepare("SELECT cover_image, back_cover_image FROM books WHERE id = ?");
-    $stmt->execute([$id]);
-    $row = $stmt->fetch();
-    $cover_image = $row['cover_image'];
-    $back_cover_image = $row['back_cover_image'];
+function echo_sweetalert($icon, $title, $text, $redirectUrl) {
+    echo '<!DOCTYPE html>
+    <html lang="th">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500&display=swap" rel="stylesheet">
+        <style>body { font-family: "Kanit", sans-serif; background-color: #f1f5f9; }</style>
+    </head>
+    <body>
+        <script>
+            Swal.fire({
+                icon: "' . $icon . '",
+                title: "' . $title . '",
+                text: "' . $text . '",
+                confirmButtonColor: "#0f172a",
+                confirmButtonText: "ตกลง"
+            }).then(() => {
+                window.location.href = "' . $redirectUrl . '";
+            });
+        </script>
+    </body>
+    </html>';
+    exit;
 }
-
-$cover_image = uploadFile('cover_image', $cover_image);
-$back_cover_image = uploadFile('back_cover_image', $back_cover_image);
-
-// 🔥 SQL Query: เพิ่มฟิลด์ rent_price_7, 15, 30
-if ($id) {
-    // Update
-    $sql = "UPDATE books SET title=?, author=?, isbn=?, category_id=?, 
-            rent_price=?, rent_price_7=?, rent_price_15=?, rent_price_30=?, 
-            sell_price=?, status=?, stock_rent=?, stock_sale=?, 
-            cover_image=?, back_cover_image=?, description=? 
-            WHERE id=?";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        $title, $author, $isbn, $category_id, 
-        $rent_price, $rent_price_7, $rent_price_15, $rent_price_30, 
-        $sell_price, $status, $stock_rent, $stock_sale, 
-        $cover_image, $back_cover_image, $description, 
-        $id
-    ]);
-} else {
-    // Insert
-    $sql = "INSERT INTO books (
-            title, author, isbn, category_id, 
-            rent_price, rent_price_7, rent_price_15, rent_price_30, 
-            sell_price, status, stock_rent, stock_sale, 
-            cover_image, back_cover_image, description
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        $title, $author, $isbn, $category_id, 
-        $rent_price, $rent_price_7, $rent_price_15, $rent_price_30, 
-        $sell_price, $status, $stock_rent, $stock_sale, 
-        $cover_image, $back_cover_image, $description
-    ]);
-}
-
-header("Location: index.php");
-exit;
 ?>

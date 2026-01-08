@@ -43,6 +43,8 @@ if (isset($_SESSION['user_id'])) {
     
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -103,7 +105,19 @@ if (isset($_SESSION['user_id'])) {
             </div>
 
             <div class="flex items-center gap-4">
-                <a href="cart.php" class="relative group p-2 rounded-full hover:bg-slate-100 transition <?php echo ($current_page == 'cart.php') ? 'text-gold-600 bg-slate-50' : 'text-slate-700'; ?>">
+                <a href="<?php echo isset($_SESSION['user_id']) ? 'cart.php' : 'javascript:void(0)'; ?>" 
+                   <?php if (!isset($_SESSION['user_id'])): ?>
+                   onclick="Swal.fire({
+                       icon: 'warning', 
+                       title: 'กรุณาเข้าสู่ระบบ', 
+                       text: 'ท่านต้องเข้าสู่ระบบเพื่อใช้งานตะกร้าสินค้า', 
+                       confirmButtonText: 'เข้าสู่ระบบ', 
+                       confirmButtonColor: '#0f172a'
+                   }).then((result) => { 
+                       if (result.isConfirmed) { window.location.href = 'login.php'; } 
+                   });"
+                   <?php endif; ?>
+                   class="relative group p-2 rounded-full hover:bg-slate-100 transition <?php echo ($current_page == 'cart.php') ? 'text-gold-600 bg-slate-50' : 'text-slate-700'; ?>">
                     <svg class="w-6 h-6 group-hover:text-gold-600 transition" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"></path></svg>
                     <?php if($cartQty > 0): ?>
                         <span class="absolute -top-1 -right-1 w-5 h-5 bg-gold-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow-md border-2 border-white"><?php echo $cartQty; ?></span>

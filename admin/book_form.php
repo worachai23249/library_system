@@ -26,7 +26,13 @@ if (isset($_GET['id'])) {
     </div>
 
     <form action="book_save.php" method="post" enctype="multipart/form-data">
-        <?php if ($book): ?><input type="hidden" name="id" value="<?php echo $book['id']; ?>"><?php endif; ?>
+        <?php if ($book): ?>
+            <input type="hidden" name="id" value="<?php echo $book['id']; ?>">
+            <input type="hidden" name="old_cover" value="<?php echo $book['cover_image'] ?? ''; ?>">
+            <input type="hidden" name="old_back_cover" value="<?php echo $book['back_cover_image'] ?? ''; ?>">
+        <?php endif; ?>
+
+        <input type="hidden" name="price" value="<?php echo $book['price'] ?? '0'; ?>">
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             

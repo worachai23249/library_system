@@ -1,253 +1,157 @@
 <?php
 session_start();
 require_once 'config/db.php';
+require_once 'includes/header.php'; // เรียก Header หน้าบ้าน
 
-if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
+// ตรวจสอบสถานะปัจจุบัน
 $user_id = $_SESSION['user_id'];
-
-// --- ส่วนจัดการบันทึกข้อมูล (PHP Logic) ---
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    try {
-        $id_card_number = $_POST['id_card_number'];
-        $laser_code = $_POST['laser_code'];
-        
-        // ตัวแปรเก็บชื่อไฟล์ (ถ้าไม่อัปโหลดใหม่ ให้เป็น null ไปก่อน)
-        $file_front = null;
-        $file_back = null;
-        $file_selfie = null;
-
-        // ฟังก์ชันช่วยอัปโหลดไฟล์
-        function uploadKYC($file, $prefix, $uid) {
-            if (!empty($file['name'])) {
-                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-                $allowed = ['jpg', 'jpeg', 'png'];
-                if (in_array($ext, $allowed)) {
-                    $new_name = "kyc_{$prefix}_{$uid}_" . time() . ".{$ext}";
-                    move_uploaded_file($file['tmp_name'], "uploads/kyc/" . $new_name);
-                    return $new_name;
-                }
-            }
-            return null;
-        }
-
-        // สร้างโฟลเดอร์ถ้ายังไม่มี
-        if (!file_exists('uploads/kyc')) { mkdir('uploads/kyc', 0777, true); }
-
-        $file_front = uploadKYC($_FILES['id_card_front'], 'front', $user_id);
-        $file_back = uploadKYC($_FILES['id_card_back'], 'back', $user_id);
-        $file_selfie = uploadKYC($_FILES['selfie_with_card'], 'selfie', $user_id);
-
-        // ถ้าอัปโหลดครบทั้ง 3 รูป (หรือจะปรับเงื่อนไขตามต้องการ)
-        if ($file_front && $file_back && $file_selfie) {
-            // อัปเดตข้อมูลลง Database
-            $sql = "UPDATE members SET 
-                    id_card_number = ?, 
-                    laser_code = ?, 
-                    id_card_front = ?, 
-                    id_card_back = ?, 
-                    selfie_with_card = ?, 
-                    verification_status = 'pending',
-                    reject_reason = NULL 
-                    WHERE id = ?";
-            
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$id_card_number, $laser_code, $file_front, $file_back, $file_selfie, $user_id]);
-
-            // Refresh เพื่อแสดงสถานะใหม่
-            echo "<script>
-                document.addEventListener('DOMContentLoaded', function() {
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'ส่งข้อมูลเรียบร้อย',
-                        text: 'เจ้าหน้าที่จะทำการตรวจสอบภายใน 24 ชม.',
-                        confirmButtonColor: '#0f172a'
-                    }).then(() => { window.location.href = 'verify.php'; });
-                });
-            </script>";
-        } else {
-            echo "<script>alert('กรุณาอัปโหลดรูปภาพให้ครบทั้ง 3 ส่วน');</script>";
-        }
-
-    } catch (Exception $e) {
-        echo "<script>alert('Error: " . $e->getMessage() . "');</script>";
-    }
-}
-
-// ดึงข้อมูลผู้ใช้ปัจจุบัน
-$stmt = $pdo->prepare("SELECT * FROM members WHERE id = ?");
+$stmt = $pdo->prepare("SELECT verification_status FROM members WHERE id = ?");
 $stmt->execute([$user_id]);
-$user = $stmt->fetch();
-$status = $user['verification_status'];
-
-require_once 'includes/header.php';
+$status = $stmt->fetchColumn();
 ?>
 
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-<div class="bg-slate-50 min-h-screen py-10 font-sans">
-    <div class="container mx-auto px-4 max-w-5xl">
-        <div class="flex flex-col md:flex-row gap-8">
-            
-            <aside class="w-full md:w-72 flex-shrink-0">
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sticky top-24">
-                    <nav class="space-y-1">
-                        <a href="profile.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                            <span class="text-sm font-medium">ข้อมูลส่วนตัว</span>
-                        </a>
-                        <a href="profile_addresses.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                            <span class="text-sm font-medium">ที่อยู่จัดส่ง</span>
-                        </a>
-                        <a href="change_password.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                            <span class="text-sm font-medium">เปลี่ยนรหัสผ่าน</span>
-                        </a>
-                        <a href="verify.php" class="flex items-center gap-3 px-4 py-3 bg-slate-900 text-white rounded-xl shadow-md transition">
-                            <svg class="w-5 h-5 text-gold-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span class="text-sm font-medium">ยืนยันตัวตน (KYC)</span>
-                        </a>
-                        <a href="messages.php" class="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 hover:text-gold-600 rounded-xl transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
-                            <span class="text-sm font-medium">การแจ้งเตือน</span>
-                        </a>
-                    </nav>
-                </div>
-            </aside>
-
-            <main class="flex-grow">
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-                    <h1 class="text-2xl font-serif font-bold text-slate-800 mb-2 flex items-center gap-3">
-                        <span class="bg-gold-100 text-gold-600 p-2 rounded-lg"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></span>
-                        ยืนยันตัวตน (KYC)
-                    </h1>
-                    <p class="text-slate-500 mb-8 text-sm">กรุณากรอกข้อมูลและอัปโหลดเอกสารเพื่อยืนยันตัวตนก่อนเริ่มใช้งาน</p>
-
-                    <?php if($status == 'verified'): ?>
-                        <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-8 text-center animate-fade-in">
-                            <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                            </div>
-                            <h3 class="text-xl font-bold text-emerald-800 mb-2">ยืนยันตัวตนสำเร็จ</h3>
-                            <p class="text-emerald-600">บัญชีของคุณได้รับการอนุมัติแล้ว สามารถใช้บริการได้ตามปกติ</p>
-                        </div>
-                    <?php elseif($status == 'pending'): ?>
-                        <div class="bg-yellow-50 border border-yellow-100 rounded-xl p-8 text-center animate-pulse">
-                            <div class="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            </div>
-                            <h3 class="text-xl font-bold text-yellow-800 mb-2">กำลังตรวจสอบ</h3>
-                            <p class="text-yellow-600">เจ้าหน้าที่กำลังตรวจสอบเอกสารของคุณ กรุณารอ 1-2 วันทำการ</p>
-                        </div>
-                    <?php else: ?>
-                        <?php if($status == 'rejected'): ?>
-                            <div class="bg-red-50 border border-red-100 rounded-xl p-4 mb-6 text-sm text-red-700 flex items-start gap-3">
-                                <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                <div>
-                                    <strong>⚠️ เอกสารไม่ผ่าน:</strong> <?php echo htmlspecialchars($user['reject_reason']); ?>
-                                    <br>กรุณาตรวจสอบและส่งข้อมูลใหม่อีกครั้ง
-                                </div>
-                            </div>
-                        <?php endif; ?>
-
-                        <form method="POST" enctype="multipart/form-data" class="space-y-8">
-                            
-                            <div class="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                                <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                    <span class="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center text-xs text-slate-600">1</span> 
-                                    ข้อมูลบัตรประชาชน
-                                </h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label class="block text-xs font-bold text-slate-500 uppercase mb-2">เลขบัตรประชาชน (13 หลัก)</label>
-                                        <input type="text" name="id_card_number" required maxlength="13" placeholder="x-xxxx-xxxxx-xx-x" 
-                                               class="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500 transition">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs font-bold text-slate-500 uppercase mb-2 flex justify-between">
-                                            เลขหลังบัตร (Laser Code)
-                                            <span class="text-[10px] text-gold-600 cursor-help" title="อยู่ด้านหลังบัตร ขึ้นต้นด้วยตัวอักษร 2 ตัว">? คำแนะนำ</span>
-                                        </label>
-                                        <input type="text" name="laser_code" required maxlength="12" placeholder="JT9-9999999-99" 
-                                               class="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500 transition">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                    <span class="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center text-xs text-slate-600">2</span> 
-                                    อัปโหลดรูปภาพยืนยัน
-                                </h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label class="block text-sm text-slate-600 mb-2">รูปถ่ายบัตรประชาชน (ด้านหน้า)</label>
-                                        <div class="relative group cursor-pointer border-2 border-dashed border-slate-300 rounded-xl p-4 hover:border-gold-500 transition bg-slate-50 h-48 flex items-center justify-center text-slate-400">
-                                            <div class="text-center pointer-events-none">
-                                                <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                                <span class="text-xs">คลิกเพื่ออัปโหลด</span>
-                                            </div>
-                                            <input type="file" name="id_card_front" required accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="previewFile(this)">
-                                            <img class="absolute inset-0 w-full h-full object-cover rounded-xl hidden preview-img pointer-events-none">
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm text-slate-600 mb-2">รูปถ่ายบัตรประชาชน (ด้านหลัง)</label>
-                                        <div class="relative group cursor-pointer border-2 border-dashed border-slate-300 rounded-xl p-4 hover:border-gold-500 transition bg-slate-50 h-48 flex items-center justify-center text-slate-400">
-                                            <div class="text-center pointer-events-none">
-                                                <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                                <span class="text-xs">คลิกเพื่ออัปโหลด</span>
-                                            </div>
-                                            <input type="file" name="id_card_back" required accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="previewFile(this)">
-                                            <img class="absolute inset-0 w-full h-full object-cover rounded-xl hidden preview-img pointer-events-none">
-                                        </div>
-                                    </div>
-
-                                    <div class="md:col-span-2">
-                                        <label class="block text-sm text-slate-600 mb-2">รูปถ่ายคู่กับบัตร (Selfie)</label>
-                                        <div class="relative group cursor-pointer border-2 border-dashed border-slate-300 rounded-xl p-4 hover:border-gold-500 transition bg-slate-50 h-64 flex items-center justify-center text-slate-400">
-                                            <div class="text-center pointer-events-none">
-                                                <svg class="w-10 h-10 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                                <span class="text-sm">คลิกเพื่ออัปโหลด</span>
-                                            </div>
-                                            <input type="file" name="selfie_with_card" required accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="previewFile(this)">
-                                            <img class="absolute inset-0 w-full h-full object-contain rounded-xl hidden preview-img pointer-events-none">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="pt-4 border-t border-slate-100 flex justify-end">
-                                <button type="submit" class="bg-slate-900 text-white px-10 py-3.5 rounded-xl font-bold hover:bg-gold-500 hover:text-slate-900 transition shadow-lg transform active:scale-95 flex items-center gap-2">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                    ส่งข้อมูลยืนยันตัวตน
-                                </button>
-                            </div>
-                        </form>
-                    <?php endif; ?>
-                </div>
-            </main>
-        </div>
+<div class="container mx-auto px-4 py-12 max-w-3xl">
+    
+    <div class="text-center mb-10">
+        <h1 class="text-3xl font-serif font-bold text-navy-900">ยืนยันตัวตน (KYC)</h1>
+        <p class="text-slate-500 mt-2">กรุณากรอกข้อมูลและแนบเอกสารเพื่อยืนยันตัวตน เพื่อสิทธิในการเช่าหนังสือ</p>
     </div>
+
+    <?php if ($status == 'pending'): ?>
+        <div class="bg-white p-10 rounded-2xl shadow-sm border border-gold-200 text-center">
+            <div class="w-20 h-20 bg-gold-100 text-gold-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <h2 class="text-2xl font-serif font-bold text-navy-900 mb-2">อยู่ระหว่างการตรวจสอบ</h2>
+            <p class="text-slate-600">
+                ระบบได้รับข้อมูลของท่านเรียบร้อยแล้ว<br>
+                เจ้าหน้าที่จะทำการตรวจสอบเอกสารภายใน 1-2 วันทำการ
+            </p>
+            <a href="index.php" class="inline-block mt-8 text-gold-600 font-bold hover:underline">กลับสู่หน้าหลัก</a>
+        </div>
+
+    <?php elseif ($status == 'verified'): ?>
+        <div class="bg-white p-10 rounded-2xl shadow-sm border border-green-200 text-center">
+             <div class="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+            <h2 class="text-2xl font-serif font-bold text-navy-900 mb-2">ยืนยันตัวตนสำเร็จ</h2>
+            <p class="text-slate-600">บัญชีของคุณได้รับการยืนยันเรียบร้อยแล้ว สามารถใช้บริการเช่าหนังสือได้ทันที</p>
+            <a href="index.php" class="inline-block mt-8 bg-navy-900 text-white px-6 py-2.5 rounded-full font-bold hover:bg-gold-500 hover:text-navy-900 transition">เลือกชมหนังสือเลย</a>
+        </div>
+
+    <?php else: ?>
+        
+        <?php if ($status == 'rejected'): ?>
+            <div class="bg-red-50 border border-red-100 text-red-700 px-6 py-4 rounded-xl mb-6 flex items-center gap-3">
+                <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <div>
+                    <span class="font-bold">การยืนยันตัวตนไม่ผ่าน:</span> กรุณาตรวจสอบความถูกต้องของเอกสารและลองใหม่อีกครั้ง
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <form action="verify_save.php" method="post" enctype="multipart/form-data" class="bg-white p-8 rounded-2xl shadow-lg border border-slate-100 space-y-6">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-navy-900 font-bold mb-2">เลขบัตรประชาชน <span class="text-red-500">*</span></label>
+                    <input type="text" name="id_card_number" required maxlength="13" class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-gold-500 focus:ring-1 focus:ring-gold-500 outline-none transition bg-slate-50" placeholder="1234567890123">
+                </div>
+                <div>
+                    <label class="block text-navy-900 font-bold mb-2">Laser Code (หลังบัตร) <span class="text-red-500">*</span></label>
+                    <input type="text" name="laser_code" required class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-gold-500 focus:ring-1 focus:ring-gold-500 outline-none transition bg-slate-50" placeholder="ME0-xxxxxxxxx">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-navy-900 font-bold mb-2">วันเกิด (ตามบัตรประชาชน) <span class="text-red-500">*</span></label>
+                <input type="date" name="dob" required class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-gold-500 focus:ring-1 focus:ring-gold-500 outline-none transition bg-slate-50">
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+                <div class="text-center">
+                    <label class="block text-sm font-bold text-slate-600 mb-2">รูปถ่ายหน้าบัตร</label>
+                    <div class="relative w-full aspect-[4/3] bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center cursor-pointer hover:border-gold-500 transition group overflow-hidden">
+                        <input type="file" name="id_card_front" required class="absolute inset-0 opacity-0 cursor-pointer z-10" onchange="preview(this, 'p1')">
+                        <img id="p1" class="hidden w-full h-full object-cover">
+                        <div class="text-slate-400 group-hover:text-gold-500 transition" id="txt1">
+                            <span class="text-2xl">+</span><br>อัปโหลด
+                        </div>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <label class="block text-sm font-bold text-slate-600 mb-2">รูปถ่ายหลังบัตร</label>
+                    <div class="relative w-full aspect-[4/3] bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center cursor-pointer hover:border-gold-500 transition group overflow-hidden">
+                        <input type="file" name="id_card_back" required class="absolute inset-0 opacity-0 cursor-pointer z-10" onchange="preview(this, 'p2')">
+                        <img id="p2" class="hidden w-full h-full object-cover">
+                        <div class="text-slate-400 group-hover:text-gold-500 transition" id="txt2">
+                            <span class="text-2xl">+</span><br>อัปโหลด
+                        </div>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <label class="block text-sm font-bold text-slate-600 mb-2">เซลฟี่คู่กับบัตร</label>
+                    <div class="relative w-full aspect-[4/3] bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center cursor-pointer hover:border-gold-500 transition group overflow-hidden">
+                        <input type="file" name="selfie_image" required class="absolute inset-0 opacity-0 cursor-pointer z-10" onchange="preview(this, 'p3')">
+                        <img id="p3" class="hidden w-full h-full object-cover">
+                        <div class="text-slate-400 group-hover:text-gold-500 transition" id="txt3">
+                            <span class="text-2xl">+</span><br>อัปโหลด
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-6">
+                <button type="submit" class="w-full bg-navy-900 text-white py-4 rounded-xl font-bold text-lg hover:bg-gold-500 hover:text-navy-900 shadow-lg transition transform active:scale-95">
+                    ส่งข้อมูลยืนยันตัวตน
+                </button>
+            </div>
+        </form>
+    <?php endif; ?>
 </div>
 
 <script>
-function previewFile(input) {
-    const parent = input.parentElement;
-    const img = parent.querySelector('.preview-img');
-    const placeholder = parent.querySelector('div');
-    
+function preview(input, imgId) {
     if (input.files && input.files[0]) {
         var reader = new FileReader();
         reader.onload = function(e) {
-            img.src = e.target.result;
-            img.classList.remove('hidden');
-            placeholder.classList.add('opacity-0');
+            document.getElementById(imgId).src = e.target.result;
+            document.getElementById(imgId).classList.remove('hidden');
+            document.getElementById('txt'+imgId.substr(1)).classList.add('hidden');
         }
         reader.readAsDataURL(input.files[0]);
     }
 }
 </script>
+
+<?php if(isset($_GET['status']) && $_GET['status'] == 'success'): ?>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        Swal.fire({
+            title: '<h3 class="font-serif text-navy-900">ส่งคำขอสำเร็จ!</h3>',
+            html: '<p class="text-slate-600 text-base">ระบบได้รับข้อมูลยืนยันตัวตนของคุณแล้ว<br>กรุณารอการตรวจสอบจากเจ้าหน้าที่ (1-2 วันทำการ)</p>',
+            icon: 'success',
+            confirmButtonText: 'รับทราบ',
+            confirmButtonColor: '#0f172a', // Navy color
+            background: '#fff',
+            backdrop: `rgba(15, 23, 42, 0.6)`,
+            customClass: {
+                popup: 'rounded-2xl shadow-xl',
+                confirmButton: 'px-6 py-2.5 rounded-lg font-bold'
+            },
+            allowOutsideClick: false
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // ลบ Query String ออก เพื่อไม่ให้ Popup เด้งซ้ำเมื่อ Refresh
+                window.history.replaceState(null, null, window.location.pathname);
+                // หรือจะ Redirect ไปหน้า Profile ก็ได้
+                // window.location.href = 'profile.php'; 
+            }
+        });
+    });
+</script>
+<?php endif; ?>
 
 <?php require_once 'includes/footer.php'; ?>
